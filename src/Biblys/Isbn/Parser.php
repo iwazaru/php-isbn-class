@@ -12,6 +12,8 @@
 
 namespace Biblys\Isbn;
 
+use Biblys\Isbn\ParsedIsbn;
+
 class Parser
 {
     // FIXME: Create custom exceptions for each case
@@ -21,42 +23,51 @@ class Parser
         ERROR_INVALID_PRODUCT_CODE = 'Product code should be 978 or 979',
         ERROR_INVALID_COUNTRY_CODE = 'Country code is unknown';
 
-    public static function parse($input)
+    public static function parse(string $input): ParsedIsbn
     {
         if (empty($input)) {
             throw new IsbnParsingException(static::ERROR_EMPTY);
         }
 
-        $inputWithoutHyphens = self::_stripHyphens($input);
-        $inputWithoutChecksum = self::_stripChecksum($inputWithoutHyphens);
+        $inputWithoutUnwantedCharacters = self::_stripUnwantedCharacters($input);
+        $inputWithoutCheckDigit = self::_stripCheckDigit($inputWithoutUnwantedCharacters);
 
-        if (!is_numeric($inputWithoutChecksum)) {
+        if (!is_numeric($inputWithoutCheckDigit)) {
             throw new IsbnParsingException(static::ERROR_INVALID_CHARACTERS);
         }
 
-        $result = self::_extractProductCode($inputWithoutChecksum);
+        $result = self::_extractGs1element($inputWithoutCheckDigit);
         $inputWithoutProductCode = $result[0];
-        $productCode = $result[1];
+        $gs1Element = $result[1];
 
-        $result = self::_extractCountryCode($inputWithoutProductCode, $productCode);
+        $result = self::_extractRegistrationGroupElement(
+            $inputWithoutProductCode,
+            $gs1Element
+        );
         $inputWithoutCountryCode = $result[0];
-        $countryCode = $result[1];
+        $registrationGroupElement = $result[1];
 
-        $result = self::_extractPublisherCode($inputWithoutCountryCode, $productCode, $countryCode);
-        $agencyCode = $result[0];
-        $publisherCode = $result[1];
-        $publicationCode = $result[2];
+        $result = self::_extractRegistrationAndPublicationElement(
+            $inputWithoutCountryCode,
+            $gs1Element,
+            $registrationGroupElement
+        );
+        $registrationAgencyName = $result[0];
+        $registrantElement = $result[1];
+        $publicationElement = $result[2];
 
-        return [
-            "productCode" => $productCode,
-            "countryCode" => $countryCode,
-            "agencyCode" => $agencyCode,
-            "publisherCode" => $publisherCode,
-            "publicationCode" => $publicationCode,
-        ];
+        return new ParsedIsbn(
+            [
+                "gs1Element" => $gs1Element,
+                "registrationGroupElement" => $registrationGroupElement,
+                "registrantElement" => $registrantElement,
+                "publicationElement" => $publicationElement,
+                "registrationAgencyName" => $registrationAgencyName,
+            ]
+        );
     }
 
-    private static function _stripHyphens($input)
+    private static function _stripUnwantedCharacters(string $input): string
     {
         $replacements = array('-', '_', ' ');
         $input = str_replace($replacements, '', $input);
@@ -64,23 +75,23 @@ class Parser
         return $input;
     }
 
-    private static function _stripChecksum($input)
+    private static function _stripCheckDigit(string $input): string
     {
         $length = strlen($input);
+
+        if ($length == 12 || $length == 9) {
+            return $input;
+        }
 
         if ($length == 13 || $length == 10) {
             $input = substr_replace($input, "", -1);
             return $input;
         }
 
-        if ($length == 12 || $length == 9) {
-            return $input;
-        }
-
         throw new IsbnParsingException(static::ERROR_INVALID_LENGTH);
     }
 
-    private static function _extractProductCode($input)
+    private static function _extractGs1element(string $input): array
     {
         if (strlen($input) == 9) {
             return [$input, 978];
@@ -95,17 +106,20 @@ class Parser
         throw new IsbnParsingException(static::ERROR_INVALID_PRODUCT_CODE);
     }
 
-    private static function _extractCountryCode($input, $productCode)
+    private static function _extractRegistrationGroupElement(
+        string $input,
+        string $gs1Element
+    ): array
     {
+        include('ranges-array.php');
+        $prefixes = $prefixes;
 
         // Get the seven first digits
         $first7 = substr($input, 0, 7);
 
         // Select the right set of rules according to the product code
-        $ranges = new Ranges();
-        $prefixes = $ranges->getPrefixes();
         foreach ($prefixes as $p) {
-            if ($p['Prefix'] == $productCode) {
+            if ($p['Prefix'] == $gs1Element) {
                 $rules = $p['Rules']['Rule'];
                 break;
             }
@@ -125,26 +139,30 @@ class Parser
             throw new IsbnParsingException(static::ERROR_INVALID_COUNTRY_CODE);
         };
 
-        $countryCode = substr($input, 0, $length);
+        $registrationGroupElement = substr($input, 0, $length);
         $input = substr($input, $length);
 
-        return [$input, $countryCode];
+        return [$input, $registrationGroupElement];
     }
 
     /**
      * Remove and save Publisher Code and Publication Code
      */
-    private static function _extractPublisherCode($input, $productCode, $countryCode)
+    private static function _extractRegistrationAndPublicationElement(
+        string $input,
+        string $gs1Element,
+        string $registrationGroupElement
+    ): array
     {
         // Get the seven first digits or less
         $first7 = substr($input, 0, 7);
         $inputLength = strlen($first7);
 
-        // Select the right set of rules according to the agency (product + country code)
+        // Select the right set of rules according to the agency
         $ranges = new Ranges();
         $groups = $ranges->getGroups();
         foreach ($groups as $g) {
-            if ($g['Prefix'] <> $productCode . '-' . $countryCode) {
+            if ($g['Prefix'] <> $gs1Element . '-' . $registrationGroupElement) {
                 continue;
             }
 
@@ -168,10 +186,10 @@ class Parser
 
                 $length = $rule['Length'];
 
-                $publisherCode = substr($input, 0, $length);
-                $publicationCode = substr($input, $length);
+                $registrantElement = substr($input, 0, $length);
+                $publicationElement = substr($input, $length);
 
-                return [$agency, $publisherCode, $publicationCode];
+                return [$agency, $registrantElement, $publicationElement];
             }
             break;
         }
