@@ -29,32 +29,18 @@ class Parser
             throw new IsbnParsingException(static::ERROR_EMPTY);
         }
 
-        $inputWithoutUnwantedCharacters = self::_stripUnwantedCharacters($input);
-        $inputWithoutCheckDigit = self::_stripCheckDigit($inputWithoutUnwantedCharacters);
+        [$inputWithoutGs1Element, $gs1Element] = self::_extractGs1Element($input);
 
-        if (!is_numeric($inputWithoutCheckDigit)) {
-            throw new IsbnParsingException(static::ERROR_INVALID_CHARACTERS);
-        }
-
-        $result = self::_extractGs1element($inputWithoutCheckDigit);
-        $inputWithoutProductCode = $result[0];
-        $gs1Element = $result[1];
-
-        $result = self::_extractRegistrationGroupElement(
-            $inputWithoutProductCode,
+        [$inputWithoutRegistrationGroupElement, $registrationGroupElement] = self::_extractRegistrationGroupElement(
+            $inputWithoutGs1Element,
             $gs1Element
         );
-        $inputWithoutCountryCode = $result[0];
-        $registrationGroupElement = $result[1];
 
-        $result = self::_extractRegistrationAndPublicationElement(
-            $inputWithoutCountryCode,
+        [$registrationAgencyName, $registrantElement, $publicationElement] = self::_extractRegistrationAndPublicationElement(
+            $inputWithoutRegistrationGroupElement,
             $gs1Element,
             $registrationGroupElement
         );
-        $registrationAgencyName = $result[0];
-        $registrantElement = $result[1];
-        $publicationElement = $result[2];
 
         return new ParsedIsbn(
             [
@@ -67,6 +53,44 @@ class Parser
         );
     }
 
+    private static function _extractGs1Element(string $input): array
+    {
+        $inputWithoutCheckDigit = self::_stripCheckDigit($input);
+
+        if (!is_numeric($inputWithoutCheckDigit)) {
+            throw new IsbnParsingException(static::ERROR_INVALID_CHARACTERS);
+        }
+
+        if (strlen($inputWithoutCheckDigit) === 9) {
+            return [$inputWithoutCheckDigit, 978];
+        }
+
+        $first3 = self::_getStringStart($inputWithoutCheckDigit, 3);
+        if (self::_isAnInvalidGs1Element($first3)) {
+            throw new IsbnParsingException(static::ERROR_INVALID_PRODUCT_CODE);
+        }
+
+        $inputWithoutGs1Element = self::_getStringEnd($inputWithoutCheckDigit, 3);
+        return [$inputWithoutGs1Element, $first3];
+    }
+
+    private static function _stripCheckDigit(string $input): string
+    {
+        $inputWithoutUnwantedCharacters = self::_stripUnwantedCharacters($input);
+        $length = strlen($inputWithoutUnwantedCharacters);
+
+        if ($length === 12 || $length === 9) {
+            return $inputWithoutUnwantedCharacters;
+        }
+
+        if ($length === 13 || $length === 10) {
+            $inputWithoutCheckDigit = substr_replace($inputWithoutUnwantedCharacters, "", -1);
+            return $inputWithoutCheckDigit;
+        }
+
+        throw new IsbnParsingException(static::ERROR_INVALID_LENGTH);
+    }
+
     private static function _stripUnwantedCharacters(string $input): string
     {
         $replacements = array('-', '_', ' ');
@@ -75,123 +99,135 @@ class Parser
         return $input;
     }
 
-    private static function _stripCheckDigit(string $input): string
+    private static function _isAnInvalidGs1Element(string $value): bool
     {
-        $length = strlen($input);
-
-        if ($length == 12 || $length == 9) {
-            return $input;
-        }
-
-        if ($length == 13 || $length == 10) {
-            $input = substr_replace($input, "", -1);
-            return $input;
-        }
-
-        throw new IsbnParsingException(static::ERROR_INVALID_LENGTH);
-    }
-
-    private static function _extractGs1element(string $input): array
-    {
-        if (strlen($input) == 9) {
-            return [$input, 978];
-        }
-
-        $first3 = substr($input, 0, 3);
-        if ($first3 == 978 || $first3 == 979) {
-            $input = substr($input, 3);
-            return [$input, $first3];
-        }
-
-        throw new IsbnParsingException(static::ERROR_INVALID_PRODUCT_CODE);
+        return $value !== "978" && $value !== "979";
     }
 
     private static function _extractRegistrationGroupElement(
-        string $input,
+        string $inputWithoutGs1Element,
         string $gs1Element
     ): array
     {
-        include('ranges-array.php');
-        $prefixes = $prefixes;
+        $length = self::_getRegistrationGroupLengthForGs1Element(
+            $inputWithoutGs1Element,
+            $gs1Element
+        );
 
-        // Get the seven first digits
-        $first7 = substr($input, 0, 7);
+        $registrationGroupElement = self::_getStringStart($inputWithoutGs1Element, $length);
+        $inputWithoutRegistrationGroupElement = self::_getStringEnd(
+            $inputWithoutGs1Element,
+            $length
+        );
 
-        // Select the right set of rules according to the product code
-        foreach ($prefixes as $p) {
-            if ($p['Prefix'] == $gs1Element) {
-                $rules = $p['Rules']['Rule'];
-                break;
-            }
-        }
-
-        // Select the right rule
-        foreach ($rules as $r) {
-            $ra = explode('-', $r['Range']);
-            if ($first7 >= $ra[0] && $first7 <= $ra[1]) {
-                $length = $r['Length'];
-                break;
-            }
-        }
-
-        // Country code is invalid
-        if (!isset($length) || $length === "0") {
-            throw new IsbnParsingException(static::ERROR_INVALID_COUNTRY_CODE);
-        };
-
-        $registrationGroupElement = substr($input, 0, $length);
-        $input = substr($input, $length);
-
-        return [$input, $registrationGroupElement];
+        return [$inputWithoutRegistrationGroupElement, $registrationGroupElement];
     }
 
-    /**
-     * Remove and save Publisher Code and Publication Code
-     */
+    private static function _getRegistrationGroupLengthForGs1Element(
+        string $inputWithoutGs1Element,
+        string $gs1Element
+    ): int {
+        foreach (self::_getRulesForGs1element($gs1Element) as $rule) {
+            $range = explode('-', $rule['Range']);
+            if (
+                self::_valueIsInRange(
+                    self::_getStringStart($inputWithoutGs1Element, 7),
+                    $range
+                ) &&
+                self::_lengthIsValid($rule['Length'])
+            ) {
+                return $rule['Length'];
+            }
+        }
+
+        throw new IsbnParsingException(static::ERROR_INVALID_COUNTRY_CODE);
+    }
+
+    private static function _getRulesForGs1element(string $gs1Element): array
+    {
+        foreach (self::_getPrefixes() as $prefix) {
+            if ($prefix['Prefix'] === $gs1Element) {
+                return $prefix['Rules']['Rule'];
+            }
+        }
+    }
+
     private static function _extractRegistrationAndPublicationElement(
-        string $input,
+        string $inputWithoutRegistrationGroupElement,
         string $gs1Element,
         string $registrationGroupElement
     ): array
     {
-        // Get the seven first digits or less
-        $first7 = substr($input, 0, 7);
-        $inputLength = strlen($first7);
+        $group = self::_getGroupForPrefix($gs1Element . '-' . $registrationGroupElement);
+        $length = self::_getLengthForGroup($group, $inputWithoutRegistrationGroupElement);
 
-        // Select the right set of rules according to the agency
-        $ranges = new Ranges();
-        $groups = $ranges->getGroups();
-        foreach ($groups as $g) {
-            if ($g['Prefix'] <> $gs1Element . '-' . $registrationGroupElement) {
-                continue;
+        $registrationAgencyName = $group['Agency'];
+        $registrantElement = self::_getStringStart($inputWithoutRegistrationGroupElement, $length);
+        $publicationElement = self::_getStringEnd($inputWithoutRegistrationGroupElement, $length);
+
+        return [$registrationAgencyName, $registrantElement, $publicationElement];
+    }
+
+    private static function _getGroupForPrefix(string $prefix): array
+    {
+        foreach (self::_getGroups() as $group) {
+            if ($group['Prefix'] === $prefix) {
+                return $group;
             }
-
-            $rules = $g['Rules']['Rule'];
-            $agency = $g['Agency'];
-
-            // Select the right rule
-            foreach ($rules as $rule) {
-
-                // Get min and max value in range
-                // and trim values to match code length
-                $range = explode('-', $rule['Range']);
-                $min = substr($range[0], 0, $inputLength);
-                $max = substr($range[1], 0, $inputLength);
-
-                // If first 7 digits is smaller than min
-                // or greater than max, continue to next rule
-                if ($first7 < $min || $first7 > $max) {
-                    continue;
-                }
-
-                $length = $rule['Length'];
-
-                $registrantElement = substr($input, 0, $length);
-                $publicationElement = substr($input, $length);
-
-                return [$agency, $registrantElement, $publicationElement];
-            }
-            break;
         }
+    }
+
+    private static function _getLengthForGroup(array $group, $input): int
+    {
+        $first7Chars = self::_getStringStart($input, 7);
+        $inputLength = strlen($first7Chars);
+
+        foreach ($group['Rules']['Rule'] as $rule) {
+            if (self::_truncatedRangeContainsValue($rule["Range"], $inputLength, $first7Chars)) {
+                return (int) $rule['Length'];
+            }
+        }
+    }
+
+    private static function _truncatedRangeContainsValue($range, $limit, $value)
+    {
+        [$min, $max] = explode('-', $range);
+        $truncatedMin = self::_getStringStart($min, $limit);
+        $truncatedMax = self::_getStringStart($max, $limit);
+
+        return $value > $truncatedMin && $value < $truncatedMax;
+    }
+
+    private static function _valueIsInRange(int $value, array $range): bool
+    {
+        return $value >= $range[0] && $value <= $range[1];
+    }
+
+    private static function _lengthIsValid(string $length): bool
+    {
+        return $length !== "0";
+    }
+
+    private static function _getStringStart(string $string, int $length): string
+    {
+        return substr($string, 0, $length);
+    }
+
+    private static function _getStringEnd(string $string,
+        int $length
+    ): string {
+        return substr($string, $length);
+    }
+
+    private static function _getPrefixes(): array
+    {
+        include('ranges-array.php');
+        return $prefixes;
+    }
+
+    private static function _getGroups(): array
+    {
+        include('ranges-array.php');
+        return $groups;
     }
 }
