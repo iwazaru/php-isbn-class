@@ -192,6 +192,11 @@ class Isbn
 
     public function __construct($code = null)
     {
+        trigger_error(
+            "Instantiating the Isbn class is deprecated and will be removed in the future. Learn more: https://git.io/JqRgc",
+            E_USER_DEPRECATED
+        );
+
         $this->_input = $code;
 
         try {
