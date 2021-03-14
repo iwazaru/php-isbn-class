@@ -12,6 +12,8 @@
 
 namespace Biblys\Isbn;
 
+use Biblys\Isbn\ParsedIsbn;
+
 class Parser
 {
     // FIXME: Create custom exceptions for each case
@@ -21,42 +23,75 @@ class Parser
         ERROR_INVALID_PRODUCT_CODE = 'Product code should be 978 or 979',
         ERROR_INVALID_COUNTRY_CODE = 'Country code is unknown';
 
-    public static function parse($input)
+    public static function parse(string $input): ParsedIsbn
     {
         if (empty($input)) {
             throw new IsbnParsingException(static::ERROR_EMPTY);
         }
 
-        $inputWithoutHyphens = self::_stripHyphens($input);
-        $inputWithoutChecksum = self::_stripChecksum($inputWithoutHyphens);
+        [$inputWithoutEanPrefixElement, $eanPrefixElement] = self::_extractEanPrefixElement($input);
 
-        if (!is_numeric($inputWithoutChecksum)) {
+        [$inputWithoutRegistrationGroupElement, $registrationGroupElement] = self::_extractRegistrationGroupElement(
+            $inputWithoutEanPrefixElement,
+            $eanPrefixElement
+        );
+
+        [$registrationAgencyName, $registrantElement, $publicationElement] = self::_extractRegistrationAndPublicationElement(
+            $inputWithoutRegistrationGroupElement,
+            $eanPrefixElement,
+            $registrationGroupElement
+        );
+
+        return new ParsedIsbn(
+            [
+                "eanPrefixElement" => $eanPrefixElement,
+                "registrationGroupElement" => $registrationGroupElement,
+                "registrantElement" => $registrantElement,
+                "publicationElement" => $publicationElement,
+                "registrationAgencyName" => $registrationAgencyName,
+            ]
+        );
+    }
+
+    private static function _extractEanPrefixElement(string $input): array
+    {
+        $inputWithoutCheckDigit = self::_stripCheckDigit($input);
+
+        if (!is_numeric($inputWithoutCheckDigit)) {
             throw new IsbnParsingException(static::ERROR_INVALID_CHARACTERS);
         }
 
-        $result = self::_extractProductCode($inputWithoutChecksum);
-        $inputWithoutProductCode = $result[0];
-        $productCode = $result[1];
+        if (strlen($inputWithoutCheckDigit) === 9) {
+            return [$inputWithoutCheckDigit, 978];
+        }
 
-        $result = self::_extractCountryCode($inputWithoutProductCode, $productCode);
-        $inputWithoutCountryCode = $result[0];
-        $countryCode = $result[1];
+        $first3 = self::_getStringStart($inputWithoutCheckDigit, 3);
+        if (self::_isAnInvalidEanPrefixElement($first3)) {
+            throw new IsbnParsingException(static::ERROR_INVALID_PRODUCT_CODE);
+        }
 
-        $result = self::_extractPublisherCode($inputWithoutCountryCode, $productCode, $countryCode);
-        $agencyCode = $result[0];
-        $publisherCode = $result[1];
-        $publicationCode = $result[2];
-
-        return [
-            "productCode" => $productCode,
-            "countryCode" => $countryCode,
-            "agencyCode" => $agencyCode,
-            "publisherCode" => $publisherCode,
-            "publicationCode" => $publicationCode,
-        ];
+        $inputWithoutEanPrefixElement = self::_getStringEnd($inputWithoutCheckDigit, 3);
+        return [$inputWithoutEanPrefixElement, $first3];
     }
 
-    private static function _stripHyphens($input)
+    private static function _stripCheckDigit(string $input): string
+    {
+        $inputWithoutUnwantedCharacters = self::_stripUnwantedCharacters($input);
+        $length = strlen($inputWithoutUnwantedCharacters);
+
+        if ($length === 12 || $length === 9) {
+            return $inputWithoutUnwantedCharacters;
+        }
+
+        if ($length === 13 || $length === 10) {
+            $inputWithoutCheckDigit = substr_replace($inputWithoutUnwantedCharacters, "", -1);
+            return $inputWithoutCheckDigit;
+        }
+
+        throw new IsbnParsingException(static::ERROR_INVALID_LENGTH);
+    }
+
+    private static function _stripUnwantedCharacters(string $input): string
     {
         $replacements = array('-', '_', ' ');
         $input = str_replace($replacements, '', $input);
@@ -64,116 +99,135 @@ class Parser
         return $input;
     }
 
-    private static function _stripChecksum($input)
+    private static function _isAnInvalidEanPrefixElement(string $value): bool
     {
-        $length = strlen($input);
-
-        if ($length == 13 || $length == 10) {
-            $input = substr_replace($input, "", -1);
-            return $input;
-        }
-
-        if ($length == 12 || $length == 9) {
-            return $input;
-        }
-
-        throw new IsbnParsingException(static::ERROR_INVALID_LENGTH);
+        return $value !== "978" && $value !== "979";
     }
 
-    private static function _extractProductCode($input)
+    private static function _extractRegistrationGroupElement(
+        string $inputWithoutEanPrefixElement,
+        string $eanPrefixElement
+    ): array
     {
-        if (strlen($input) == 9) {
-            return [$input, 978];
-        }
+        $length = self::_getRegistrationGroupLengthForEanPrefixElement(
+            $inputWithoutEanPrefixElement,
+            $eanPrefixElement
+        );
 
-        $first3 = substr($input, 0, 3);
-        if ($first3 == 978 || $first3 == 979) {
-            $input = substr($input, 3);
-            return [$input, $first3];
-        }
+        $registrationGroupElement = self::_getStringStart($inputWithoutEanPrefixElement, $length);
+        $inputWithoutRegistrationGroupElement = self::_getStringEnd(
+            $inputWithoutEanPrefixElement,
+            $length
+        );
 
-        throw new IsbnParsingException(static::ERROR_INVALID_PRODUCT_CODE);
+        return [$inputWithoutRegistrationGroupElement, $registrationGroupElement];
     }
 
-    private static function _extractCountryCode($input, $productCode)
-    {
-
-        // Get the seven first digits
-        $first7 = substr($input, 0, 7);
-
-        // Select the right set of rules according to the product code
-        $ranges = new Ranges();
-        $prefixes = $ranges->getPrefixes();
-        foreach ($prefixes as $p) {
-            if ($p['Prefix'] == $productCode) {
-                $rules = $p['Rules']['Rule'];
-                break;
+    private static function _getRegistrationGroupLengthForEanPrefixElement(
+        string $inputWithoutEanPrefixElement,
+        string $eanPrefixElement
+    ): int {
+        foreach (self::_getRulesForEanPrefixelement($eanPrefixElement) as $rule) {
+            $range = explode('-', $rule['Range']);
+            if (
+                self::_valueIsInRange(
+                    self::_getStringStart($inputWithoutEanPrefixElement, 7),
+                    $range
+                ) &&
+                self::_lengthIsValid($rule['Length'])
+            ) {
+                return $rule['Length'];
             }
         }
 
-        // Select the right rule
-        foreach ($rules as $r) {
-            $ra = explode('-', $r['Range']);
-            if ($first7 >= $ra[0] && $first7 <= $ra[1]) {
-                $length = $r['Length'];
-                break;
-            }
-        }
-
-        // Country code is invalid
-        if (!isset($length) || $length === "0") {
-            throw new IsbnParsingException(static::ERROR_INVALID_COUNTRY_CODE);
-        };
-
-        $countryCode = substr($input, 0, $length);
-        $input = substr($input, $length);
-
-        return [$input, $countryCode];
+        throw new IsbnParsingException(static::ERROR_INVALID_COUNTRY_CODE);
     }
 
-    /**
-     * Remove and save Publisher Code and Publication Code
-     */
-    private static function _extractPublisherCode($input, $productCode, $countryCode)
+    private static function _getRulesForEanPrefixelement(string $eanPrefixElement): array
     {
-        // Get the seven first digits or less
-        $first7 = substr($input, 0, 7);
-        $inputLength = strlen($first7);
-
-        // Select the right set of rules according to the agency (product + country code)
-        $ranges = new Ranges();
-        $groups = $ranges->getGroups();
-        foreach ($groups as $g) {
-            if ($g['Prefix'] <> $productCode . '-' . $countryCode) {
-                continue;
+        foreach (self::_getPrefixes() as $prefix) {
+            if ($prefix['Prefix'] === $eanPrefixElement) {
+                return $prefix['Rules']['Rule'];
             }
-
-            $rules = $g['Rules']['Rule'];
-            $agency = $g['Agency'];
-
-            // Select the right rule
-            foreach ($rules as $rule) {
-
-                // Get min and max value in range
-                // and trim values to match code length
-                $range = explode('-', $rule['Range']);
-                $min = substr($range[0], 0, $inputLength);
-                $max = substr($range[1], 0, $inputLength);
-
-                // If first 7 digits is smaller than min
-                // or greater than max, continue to next rule
-                if ($first7 < $min || $first7 > $max) {
-                    continue;
-                }
-
-                $length = $rule['Length'];
-
-                $publisherCode = substr($input, 0, $length);
-                $publicationCode = substr($input, $length);
-
-                return [$agency, $publisherCode, $publicationCode];
-            }
-            break;
         }
+    }
+
+    private static function _extractRegistrationAndPublicationElement(
+        string $inputWithoutRegistrationGroupElement,
+        string $eanPrefixElement,
+        string $registrationGroupElement
+    ): array
+    {
+        $group = self::_getGroupForPrefix($eanPrefixElement . '-' . $registrationGroupElement);
+        $length = self::_getLengthForGroup($group, $inputWithoutRegistrationGroupElement);
+
+        $registrationAgencyName = $group['Agency'];
+        $registrantElement = self::_getStringStart($inputWithoutRegistrationGroupElement, $length);
+        $publicationElement = self::_getStringEnd($inputWithoutRegistrationGroupElement, $length);
+
+        return [$registrationAgencyName, $registrantElement, $publicationElement];
+    }
+
+    private static function _getGroupForPrefix(string $prefix): array
+    {
+        foreach (self::_getGroups() as $group) {
+            if ($group['Prefix'] === $prefix) {
+                return $group;
+            }
+        }
+    }
+
+    private static function _getLengthForGroup(array $group, $input): int
+    {
+        $first7Chars = self::_getStringStart($input, 7);
+        $inputLength = strlen($first7Chars);
+
+        foreach ($group['Rules']['Rule'] as $rule) {
+            if (self::_truncatedRangeContainsValue($rule["Range"], $inputLength, $first7Chars)) {
+                return (int) $rule['Length'];
+            }
+        }
+    }
+
+    private static function _truncatedRangeContainsValue($range, $limit, $value)
+    {
+        [$min, $max] = explode('-', $range);
+        $truncatedMin = self::_getStringStart($min, $limit);
+        $truncatedMax = self::_getStringStart($max, $limit);
+
+        return $value > $truncatedMin && $value < $truncatedMax;
+    }
+
+    private static function _valueIsInRange(int $value, array $range): bool
+    {
+        return $value >= $range[0] && $value <= $range[1];
+    }
+
+    private static function _lengthIsValid(string $length): bool
+    {
+        return $length !== "0";
+    }
+
+    private static function _getStringStart(string $string, int $length): string
+    {
+        return substr($string, 0, $length);
+    }
+
+    private static function _getStringEnd(string $string,
+        int $length
+    ): string {
+        return substr($string, $length);
+    }
+
+    private static function _getPrefixes(): array
+    {
+        include('ranges-array.php');
+        return $prefixes;
+    }
+
+    private static function _getGroups(): array
+    {
+        include('ranges-array.php');
+        return $groups;
     }
 }

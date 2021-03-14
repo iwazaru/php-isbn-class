@@ -166,29 +166,45 @@ class Isbn
         }
     }
 
+    /**
+     * Returns a parsed isbn
+     *
+     * @param string $input A string to be parsed as an ISBN
+     *
+     * @return Biblys\Isbn\ParsedIsbn the parsed isbn object
+     */
+    static public function parse(string $input): ParsedIsbn
+    {
+        return Parser::parse($input);
+    }
+
     /* Legacy non static properties and methods (backward compatibility) */
     // FIXME: deprecate and remove on next major version
 
     private $_input;
-    private $_gs1productCode;
-    private $_countryCode;
-    private $_publisherCode;
-    private $_publicationCode;
+    private $_eanPrefixElement;
+    private $_registrationGroupElement;
+    private $_registrantElement;
+    private $_publicationElement;
     private $_isbnAgencyCode;
     private $_checksumCharacter;
     private $_gtin14Prefix;
 
     public function __construct($code = null)
     {
+        trigger_error(
+            "Instantiating the Isbn class is deprecated and will be removed in the future. Learn more: https://git.io/JqRgc",
+            E_USER_DEPRECATED
+        );
+
         $this->_input = $code;
 
         try {
             $parsedCode = Parser::parse($code);
-            $this->_gs1productCode = $parsedCode["productCode"];
-            $this->_countryCode = $parsedCode["countryCode"];
-            $this->_isbnAgencyCode = $parsedCode["agencyCode"];
-            $this->_publisherCode = $parsedCode["publisherCode"];
-            $this->_publicationCode = $parsedCode["publicationCode"];
+            $this->_eanPrefixElement = $parsedCode->getEanPrefixElement();
+            $this->_registrationGroupElement = $parsedCode->getRegistrationGroupElement();
+            $this->_registrantElement = $parsedCode->getRegistrantElement();
+            $this->_publicationElement = $parsedCode->getPublicationElement();
         } catch (IsbnParsingException $exception) {
             // FIXME in next major version (breaking change)
             // For backward compatibility reason, instanciating should not throw
@@ -310,22 +326,22 @@ class Isbn
 
     public function getProduct()
     {
-        return $this->_gs1productCode;
+        return $this->_eanPrefixElement;
     }
 
     public function getCountry()
     {
-        return $this->_countryCode;
+        return $this->_registrationGroupElement;
     }
 
     public function getPublisher()
     {
-        return $this->_publisherCode;
+        return $this->_registrantElement;
     }
 
     public function getPublication()
     {
-        return $this->_publicationCode;
+        return $this->_publicationElement;
     }
 
     public function getChecksum()

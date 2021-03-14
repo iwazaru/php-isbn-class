@@ -16,59 +16,59 @@ class Formatter
 {
     public static function formatAsIsbn10(string $input): string
     {
-        $parsedInput = Parser::parse($input);
-        $countryCode = $parsedInput["countryCode"];
-        $publisherCode = $parsedInput["publisherCode"];
-        $publicationCode = $parsedInput["publicationCode"];
-        $checksum = self::_calculateChecksumForIsbn10Format($countryCode, $publisherCode, $publicationCode);
+        $isbn = Parser::parse($input);
+        $registrationGroupElement = $isbn->getRegistrationGroupElement();
+        $registrantElement = $isbn->getRegistrantElement();
+        $publicationCode = $isbn->getPublicationElement();
+        $checksum = self::_calculateChecksumForIsbn10Format($registrationGroupElement, $registrantElement, $publicationCode);
 
-        return "$countryCode-$publisherCode-$publicationCode-$checksum";
+        return "$registrationGroupElement-$registrantElement-$publicationCode-$checksum";
     }
 
     public static function formatAsIsbn13(string $input): string
     {
-        $parsedInput = Parser::parse($input);
-        $productCode = $parsedInput['productCode'];
-        $countryCode = $parsedInput["countryCode"];
-        $publisherCode = $parsedInput["publisherCode"];
-        $publicationCode = $parsedInput["publicationCode"];
-        $checksum = self::_calculateChecksumForIsbn13Format($productCode, $countryCode, $publisherCode, $publicationCode);
+        $isbn = Parser::parse($input);
+        $eanPrefixElement = $isbn->getEanPrefixElement();
+        $registrationGroupElement = $isbn->getRegistrationGroupElement();
+        $registrantElement = $isbn->getRegistrantElement();
+        $publicationCode = $isbn->getPublicationElement();
+        $checksum = self::_calculateChecksumForIsbn13Format($eanPrefixElement, $registrationGroupElement, $registrantElement, $publicationCode);
 
-        return "$productCode-$countryCode-$publisherCode-$publicationCode-$checksum";
+        return "$eanPrefixElement-$registrationGroupElement-$registrantElement-$publicationCode-$checksum";
     }
 
     public static function formatAsEan13(string $input): string
     {
-        $parsedInput = Parser::parse($input);
-        $productCode = $parsedInput['productCode'];
-        $countryCode = $parsedInput["countryCode"];
-        $publisherCode = $parsedInput["publisherCode"];
-        $publicationCode = $parsedInput["publicationCode"];
-        $checksum = self::_calculateChecksumForIsbn13Format($productCode, $countryCode, $publisherCode, $publicationCode);
+        $isbn = Parser::parse($input);
+        $eanPrefixElement = $isbn->getEanPrefixElement();
+        $registrationGroupElement = $isbn->getRegistrationGroupElement();
+        $registrantElement = $isbn->getRegistrantElement();
+        $publicationCode = $isbn->getPublicationElement();
+        $checksum = self::_calculateChecksumForIsbn13Format($eanPrefixElement, $registrationGroupElement, $registrantElement, $publicationCode);
 
-        return $productCode . $countryCode . $publisherCode . $publicationCode . $checksum;
+        return $eanPrefixElement . $registrationGroupElement . $registrantElement . $publicationCode . $checksum;
     }
 
     public static function formatAsGtin14(string $input, int $prefix): string
     {
-        $parsedInput = Parser::parse($input);
-        $productCode = $parsedInput['productCode'];
-        $countryCode = $parsedInput['countryCode'];
-        $publisherCode = $parsedInput['publisherCode'];
-        $publicationCode = $parsedInput['publicationCode'];
+        $isbn = Parser::parse($input);
+        $eanPrefixElement = $isbn->getEanPrefixElement();
+        $registrationGroupElement = $isbn->getRegistrationGroupElement();
+        $registrantElement = $isbn->getRegistrantElement();
+        $publicationCode = $isbn->getPublicationElement();
 
-        $productCodeWithPrefix = $prefix . $productCode;
-        $checksum = self::_calculateChecksumForIsbn13Format($productCodeWithPrefix, $countryCode, $publisherCode, $publicationCode);
+        $eanPrefixElementWithPrefix = $prefix . $eanPrefixElement;
+        $checksum = self::_calculateChecksumForIsbn13Format($eanPrefixElementWithPrefix, $registrationGroupElement, $registrantElement, $publicationCode);
 
-        return $prefix . $productCode . $countryCode . $publisherCode . $publicationCode . $checksum;
+        return $prefix . $eanPrefixElement . $registrationGroupElement . $registrantElement . $publicationCode . $checksum;
     }
 
     private static function _calculateChecksumForIsbn10Format(
-        string $countryCode,
-        string $publisherCode,
+        string $registrationGroupElement,
+        string $registrantElement,
         string $publicationCode
     ): string {
-        $code = $countryCode . $publisherCode . $publicationCode;
+        $code = $registrationGroupElement . $registrantElement . $publicationCode;
         $chars = str_split($code);
 
         $checksum = (11 - (
@@ -90,14 +90,14 @@ class Formatter
     }
 
     private static function _calculateChecksumForIsbn13Format(
-        string $productCode,
-        string $countryCode,
-        string $publisherCode,
+        string $eanPrefixElement,
+        string $registrationGroupElement,
+        string $registrantElement,
         string $publicationCode
     ): string {
         $checksum = null;
 
-        $code = $productCode . $countryCode . $publisherCode . $publicationCode;
+        $code = $eanPrefixElement . $registrationGroupElement . $registrantElement . $publicationCode;
         $chars = array_reverse(str_split($code));
 
         foreach ($chars as $index => $char) {
