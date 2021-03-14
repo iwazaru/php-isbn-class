@@ -28,11 +28,11 @@ class testParse extends TestCase
     $this->assertInstanceOf("Biblys\Isbn\ParsedIsbn", $isbn);
   }
 
-  public function testGetGs1Element()
+  public function testGetEanPrefixElement()
   {
     $isbn = Isbn::parse("9782207258040");
 
-    $this->assertEquals("978", $isbn->getGs1Element());
+    $this->assertEquals("978", $isbn->getEanPrefixElement());
   }
 
   public function testGetRegistrationGroupElement()

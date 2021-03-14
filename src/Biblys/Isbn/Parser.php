@@ -29,22 +29,22 @@ class Parser
             throw new IsbnParsingException(static::ERROR_EMPTY);
         }
 
-        [$inputWithoutGs1Element, $gs1Element] = self::_extractGs1Element($input);
+        [$inputWithoutEanPrefixElement, $eanPrefixElement] = self::_extractEanPrefixElement($input);
 
         [$inputWithoutRegistrationGroupElement, $registrationGroupElement] = self::_extractRegistrationGroupElement(
-            $inputWithoutGs1Element,
-            $gs1Element
+            $inputWithoutEanPrefixElement,
+            $eanPrefixElement
         );
 
         [$registrationAgencyName, $registrantElement, $publicationElement] = self::_extractRegistrationAndPublicationElement(
             $inputWithoutRegistrationGroupElement,
-            $gs1Element,
+            $eanPrefixElement,
             $registrationGroupElement
         );
 
         return new ParsedIsbn(
             [
-                "gs1Element" => $gs1Element,
+                "eanPrefixElement" => $eanPrefixElement,
                 "registrationGroupElement" => $registrationGroupElement,
                 "registrantElement" => $registrantElement,
                 "publicationElement" => $publicationElement,
@@ -53,7 +53,7 @@ class Parser
         );
     }
 
-    private static function _extractGs1Element(string $input): array
+    private static function _extractEanPrefixElement(string $input): array
     {
         $inputWithoutCheckDigit = self::_stripCheckDigit($input);
 
@@ -66,12 +66,12 @@ class Parser
         }
 
         $first3 = self::_getStringStart($inputWithoutCheckDigit, 3);
-        if (self::_isAnInvalidGs1Element($first3)) {
+        if (self::_isAnInvalidEanPrefixElement($first3)) {
             throw new IsbnParsingException(static::ERROR_INVALID_PRODUCT_CODE);
         }
 
-        $inputWithoutGs1Element = self::_getStringEnd($inputWithoutCheckDigit, 3);
-        return [$inputWithoutGs1Element, $first3];
+        $inputWithoutEanPrefixElement = self::_getStringEnd($inputWithoutCheckDigit, 3);
+        return [$inputWithoutEanPrefixElement, $first3];
     }
 
     private static function _stripCheckDigit(string $input): string
@@ -99,39 +99,39 @@ class Parser
         return $input;
     }
 
-    private static function _isAnInvalidGs1Element(string $value): bool
+    private static function _isAnInvalidEanPrefixElement(string $value): bool
     {
         return $value !== "978" && $value !== "979";
     }
 
     private static function _extractRegistrationGroupElement(
-        string $inputWithoutGs1Element,
-        string $gs1Element
+        string $inputWithoutEanPrefixElement,
+        string $eanPrefixElement
     ): array
     {
-        $length = self::_getRegistrationGroupLengthForGs1Element(
-            $inputWithoutGs1Element,
-            $gs1Element
+        $length = self::_getRegistrationGroupLengthForEanPrefixElement(
+            $inputWithoutEanPrefixElement,
+            $eanPrefixElement
         );
 
-        $registrationGroupElement = self::_getStringStart($inputWithoutGs1Element, $length);
+        $registrationGroupElement = self::_getStringStart($inputWithoutEanPrefixElement, $length);
         $inputWithoutRegistrationGroupElement = self::_getStringEnd(
-            $inputWithoutGs1Element,
+            $inputWithoutEanPrefixElement,
             $length
         );
 
         return [$inputWithoutRegistrationGroupElement, $registrationGroupElement];
     }
 
-    private static function _getRegistrationGroupLengthForGs1Element(
-        string $inputWithoutGs1Element,
-        string $gs1Element
+    private static function _getRegistrationGroupLengthForEanPrefixElement(
+        string $inputWithoutEanPrefixElement,
+        string $eanPrefixElement
     ): int {
-        foreach (self::_getRulesForGs1element($gs1Element) as $rule) {
+        foreach (self::_getRulesForEanPrefixelement($eanPrefixElement) as $rule) {
             $range = explode('-', $rule['Range']);
             if (
                 self::_valueIsInRange(
-                    self::_getStringStart($inputWithoutGs1Element, 7),
+                    self::_getStringStart($inputWithoutEanPrefixElement, 7),
                     $range
                 ) &&
                 self::_lengthIsValid($rule['Length'])
@@ -143,10 +143,10 @@ class Parser
         throw new IsbnParsingException(static::ERROR_INVALID_COUNTRY_CODE);
     }
 
-    private static function _getRulesForGs1element(string $gs1Element): array
+    private static function _getRulesForEanPrefixelement(string $eanPrefixElement): array
     {
         foreach (self::_getPrefixes() as $prefix) {
-            if ($prefix['Prefix'] === $gs1Element) {
+            if ($prefix['Prefix'] === $eanPrefixElement) {
                 return $prefix['Rules']['Rule'];
             }
         }
@@ -154,11 +154,11 @@ class Parser
 
     private static function _extractRegistrationAndPublicationElement(
         string $inputWithoutRegistrationGroupElement,
-        string $gs1Element,
+        string $eanPrefixElement,
         string $registrationGroupElement
     ): array
     {
-        $group = self::_getGroupForPrefix($gs1Element . '-' . $registrationGroupElement);
+        $group = self::_getGroupForPrefix($eanPrefixElement . '-' . $registrationGroupElement);
         $length = self::_getLengthForGroup($group, $inputWithoutRegistrationGroupElement);
 
         $registrationAgencyName = $group['Agency'];
